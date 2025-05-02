@@ -40,24 +40,14 @@ const processS3Response = async (s3Objects, prefix, generateUrls = false) => {
 
   // Process objects from S3 into files and folders
   for (const item of s3Objects) {
-    // Remove the current prefix from the key to get the relative path
-    const key = item.Key;
-    const relativePath = key.startsWith(normalizedPrefix)
-      ? key.slice(normalizedPrefix.length)
-      : key;
+    // Handle CommonPrefix objects (folders from S3)
+    if (item.Prefix) {
+      const folderPath = item.Prefix;
+      const folderName = folderPath
+        .replace(normalizedPrefix, "")
+        .replace(/\/$/, "");
 
-    // Skip the folder itself (which often appears as an object)
-    if (relativePath === "") continue;
-
-    // Check if this is a file or a subfolder
-    if (relativePath.includes("/")) {
-      // This is a subfolder or a file in a subfolder
-      const folderName = relativePath.split("/")[0];
-      const folderPath = normalizedPrefix + folderName + "/";
-
-      // Only add each folder once
-      if (!processedFolders.has(folderPath)) {
-        processedFolders.add(folderPath);
+      if (folderName) {
         result.folders.push({
           key: folderPath,
           name: folderName,
@@ -65,23 +55,54 @@ const processS3Response = async (s3Objects, prefix, generateUrls = false) => {
           type: "folder",
         });
       }
-    } else {
-      // This is a file in the current directory
-      let fileObject = {
-        key,
-        name: relativePath,
-        isFolder: false,
-        lastModified: item.LastModified,
-        size: item.Size,
-        type: getContentType(relativePath),
-      };
+      continue;
+    }
 
-      // Generate signed URL if requested
-      if (generateUrls) {
-        fileObject.signedUrl = await getSignedUrl(key);
+    // Handle Contents objects (files from S3)
+    if (item.Key) {
+      // Remove the current prefix from the key to get the relative path
+      const key = item.Key;
+      const relativePath = key.startsWith(normalizedPrefix)
+        ? key.slice(normalizedPrefix.length)
+        : key;
+
+      // Skip the folder itself (which often appears as an object)
+      if (relativePath === "") continue;
+
+      // Check if this is a file or a subfolder
+      if (relativePath.includes("/")) {
+        // This is a subfolder or a file in a subfolder
+        const folderName = relativePath.split("/")[0];
+        const folderPath = normalizedPrefix + folderName + "/";
+
+        // Only add each folder once
+        if (!processedFolders.has(folderPath)) {
+          processedFolders.add(folderPath);
+          result.folders.push({
+            key: folderPath,
+            name: folderName,
+            isFolder: true,
+            type: "folder",
+          });
+        }
+      } else {
+        // This is a file in the current directory
+        let fileObject = {
+          key,
+          name: relativePath,
+          isFolder: false,
+          lastModified: item.LastModified,
+          size: item.Size,
+          type: getContentType(relativePath),
+        };
+
+        // Generate signed URL if requested
+        if (generateUrls) {
+          fileObject.signedUrl = await getSignedUrl(key);
+        }
+
+        result.files.push(fileObject);
       }
-
-      result.files.push(fileObject);
     }
   }
 
@@ -309,6 +330,54 @@ exports.deleteFile = async (event) => {
         "Access-Control-Allow-Credentials": true,
       },
       body: JSON.stringify({ error: "Failed to delete file" }),
+    };
+  }
+};
+
+/**
+ * Create a folder in S3
+ */
+exports.createFolder = async (event) => {
+  try {
+    const { folderPath } = JSON.parse(event.body);
+
+    // Ensure the folder path ends with a trailing slash
+    const normalizedPath = folderPath.endsWith("/")
+      ? folderPath
+      : `${folderPath}/`;
+
+    // Create an empty object with the folder path as the key
+    // This effectively creates a "folder" in S3
+    const params = {
+      Bucket: bucketName,
+      Key: normalizedPath,
+      Body: "", // Empty content for the folder marker object
+    };
+
+    await s3.putObject(params).promise();
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+      },
+      body: JSON.stringify({
+        message: "Folder created successfully",
+        folderPath: normalizedPath,
+      }),
+    };
+  } catch (error) {
+    console.error("Error creating folder:", error);
+    return {
+      statusCode: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+      },
+      body: JSON.stringify({ error: "Failed to create folder" }),
     };
   }
 };

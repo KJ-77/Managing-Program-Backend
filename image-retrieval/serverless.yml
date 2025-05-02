@@ -26,7 +26,7 @@ provider:
             - !GetAtt DocumentBucket.Arn
             - !Join ["", [!GetAtt DocumentBucket.Arn, "/*"]]
   httpApi:
-    cors: true  # Enable CORS for all endpoints
+    cors: true # Enable CORS for all endpoints
 
 functions:
   listFiles:
@@ -57,6 +57,13 @@ functions:
           path: /files/{key+}
           method: delete
 
+  createFolder:
+    handler: handlers/files.createFolder
+    events:
+      - httpApi:
+          path: /folders
+          method: post
+
   # Add an OPTIONS handler for CORS preflight requests
   options:
     handler: handlers/cors.handler
@@ -66,6 +73,9 @@ functions:
           method: options
       - httpApi:
           path: /files/{key+}
+          method: options
+      - httpApi:
+          path: /folders
           method: options
 
 resources:
