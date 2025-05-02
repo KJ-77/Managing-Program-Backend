@@ -1,0 +1,20 @@
+{
+  "name": "royal-garden-image-retrieval",
+  "version": "1.0.0",
+  "description": "Backend services for Royal Garden document management",
+  "main": "handler.js",
+  "scripts": {
+    "start": "serverless offline",
+    "deploy": "serverless deploy",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1490.0"
+  },
+  "devDependencies": {
+    "serverless": "^3.34.0",
+    "serverless-offline": "^13.9.0"
+  },
+  "author": "Royal Garden Team",
+  "license": "ISC"
+}

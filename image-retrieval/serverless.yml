@@ -8,11 +8,135 @@ service: image-retrieval
 provider:
   name: aws
   runtime: nodejs20.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  environment:
+    S3_BUCKET_NAME: ${self:resources.Resources.DocumentBucket.Properties.BucketName}
+    CLOUDFRONT_DISTRIBUTION_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+            - s3:ListBucket
+          Resource:
+            - !GetAtt DocumentBucket.Arn
+            - !Join ["", [!GetAtt DocumentBucket.Arn, "/*"]]
+  httpApi:
+    cors: true  # Enable CORS for all endpoints
 
 functions:
-  hello:
-    handler: handler.hello
+  listFiles:
+    handler: handlers/files.listFiles
     events:
       - httpApi:
-          path: /
+          path: /files
           method: get
+
+  getFileUrl:
+    handler: handlers/files.getFileUrl
+    events:
+      - httpApi:
+          path: /files/{key+}
+          method: get
+
+  getUploadUrl:
+    handler: handlers/files.getUploadUrl
+    events:
+      - httpApi:
+          path: /files
+          method: post
+
+  deleteFile:
+    handler: handlers/files.deleteFile
+    events:
+      - httpApi:
+          path: /files/{key+}
+          method: delete
+
+  # Add an OPTIONS handler for CORS preflight requests
+  options:
+    handler: handlers/cors.handler
+    events:
+      - httpApi:
+          path: /files
+          method: options
+      - httpApi:
+          path: /files/{key+}
+          method: options
+
+resources:
+  Resources:
+    DocumentBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: royal-garden-documents-${self:provider.stage}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders:
+                - "*"
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              AllowedOrigins:
+                - "*"
+              MaxAge: 3000
+
+    CloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Origins:
+            - DomainName: !GetAtt DocumentBucket.RegionalDomainName
+              Id: S3Origin
+              S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+          Enabled: true
+          DefaultCacheBehavior:
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            ForwardedValues:
+              QueryString: false
+              Cookies:
+                Forward: none
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+          PriceClass: PriceClass_100
+          ViewerCertificate:
+            CloudFrontDefaultCertificate: true
+
+    CloudFrontOriginAccessIdentity:
+      Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+      Properties:
+        CloudFrontOriginAccessIdentityConfig:
+          Comment: "OAI for Royal Garden documents"
+
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref DocumentBucket
+        PolicyDocument:
+          Statement:
+            - Action:
+                - "s3:GetObject"
+              Effect: Allow
+              Resource: !Join ["", [!GetAtt DocumentBucket.Arn, "/*"]]
+              Principal:
+                AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOriginAccessIdentity}"
+
+custom:
+  corsAllowedOrigins:
+    - http://localhost:3000
+    - http://localhost:5173
+    - https://*.vercel.app
+
+plugins:
+  - serverless-offline
